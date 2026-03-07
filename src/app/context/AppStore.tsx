@@ -212,7 +212,7 @@ function toMatchDocument(match: Match): MatchDocument {
 }
 
 // ─── Provider ─────────────────────────────────────────────────────────────────
-export function AppProvider({ children }: { children: ReactNode }) {
+export function AppProvider({ children }: { children?: ReactNode }) {
   const [screen, setScreen] = useState<Screen>({ name: 'list' });
   const [matches, setMatches] = useState<Match[]>(isFirebaseConfigured ? [] : initialMatches);
 
