@@ -1,11 +1,11 @@
 import React, { useState } from 'react';
 import {
   ChevronLeft, Users, Layers, Clock, Mail, DollarSign,
-  UserPlus, Lock, Unlock, Trash2, ChevronRight, X, Check, LogOut, FileText,
+  UserPlus, Lock, Unlock, Trash2, ChevronRight, X, Check, LogOut, FileText, Eye,
 } from 'lucide-react';
 import {
   useAppStore, computeCostPerPlayer, formatCost, formatTime,
-  PaymentStatus, Player,
+  PaymentStatus, Player, MatchAuditEntry,
 } from '../context/AppStore';
 import { ImportMatchModal } from './ImportMatchModal';
 
@@ -100,6 +100,8 @@ export function MatchDetails({ id }: Props) {
 
   const [showAddPlayer, setShowAddPlayer] = useState(false);
   const [newPlayerName, setNewPlayerName] = useState('');
+  const [newPlayerPin, setNewPlayerPin] = useState('');
+  const [addPlayerError, setAddPlayerError] = useState('');
   const [joinName, setJoinName] = useState('');
   const [joinPin, setJoinPin] = useState('');
   const [joinError, setJoinError] = useState('');
@@ -131,6 +133,8 @@ export function MatchDetails({ id }: Props) {
   const [registrationPinInput, setRegistrationPinInput] = useState('');
   const [pinError, setPinError] = useState('');
   const [pinAction, setPinAction] = useState<'open' | 'close' | 'delete' | null>(null);
+  const [actionNotice, setActionNotice] = useState('');
+  const [showAuditLog, setShowAuditLog] = useState(false);
 
   if (!match) {
     return (
@@ -145,17 +149,53 @@ export function MatchDetails({ id }: Props) {
   const unpaidPlayers = match.players.filter(p => p.status === 'unpaid');
   const cashPlayers   = match.players.filter(p => p.status === 'cash');
   const isFull        = match.players.length >= match.maxPlayers;
+  const isJoinAddBlocked = match.registrationClosed || isFull;
+  const blockedActionMessage = match.registrationClosed ? 'Registration is closed.' : 'Game is full.';
+  const sortedAuditLog = [...match.auditLog].sort((a, b) => b.at - a.at);
+
+  const formatAuditTime = (entry: MatchAuditEntry) =>
+    new Date(entry.at).toLocaleString('en-US', {
+      month: 'short',
+      day: 'numeric',
+      hour: 'numeric',
+      minute: '2-digit',
+    });
 
   const handleAddPlayer = () => {
-    if (match.registrationClosed) return;
-    if (!newPlayerName.trim()) return;
-    addPlayer(match.id, newPlayerName);
+    if (match.registrationClosed) {
+      setActionNotice('Registration is closed.');
+      return;
+    }
+    if (isFull) {
+      setActionNotice('Game is full.');
+      return;
+    }
+    const trimmedName = newPlayerName.trim();
+    if (!trimmedName) {
+      setAddPlayerError('Name is required.');
+      return;
+    }
+    if (newPlayerPin && !/^\d{4}$/.test(newPlayerPin)) {
+      setAddPlayerError('PIN must be exactly 4 digits.');
+      return;
+    }
+    addPlayer(match.id, trimmedName, newPlayerPin || null);
+    setActionNotice('');
+    setAddPlayerError('');
     setNewPlayerName('');
+    setNewPlayerPin('');
     setShowAddPlayer(false);
   };
 
   const handleJoin = () => {
-    if (match.registrationClosed || isFull) return;
+    if (match.registrationClosed) {
+      setActionNotice('Registration is closed.');
+      return;
+    }
+    if (isFull) {
+      setActionNotice('Game is full.');
+      return;
+    }
     if (!joinName.trim()) {
       setJoinError('Name is required.');
       return;
@@ -168,6 +208,7 @@ export function MatchDetails({ id }: Props) {
     setJoinName('');
     setJoinPin('');
     setJoinError('');
+    setActionNotice('');
     setShowJoin(false);
   };
 
@@ -333,6 +374,9 @@ export function MatchDetails({ id }: Props) {
       setJoinPin('');
       setJoinError('');
       setShowAddPlayer(false);
+      setNewPlayerName('');
+      setNewPlayerPin('');
+      setAddPlayerError('');
       setShowImport(false);
       setStatusConfirmPlayer(null);
       setStatusTarget(null);
@@ -352,6 +396,14 @@ export function MatchDetails({ id }: Props) {
         <button onClick={() => navigate({ name: 'list' })} className="flex items-center gap-1 mb-4 opacity-80 active:opacity-60 transition-opacity">
           <ChevronLeft size={20} color="white" />
           <span style={{ color: 'white', fontWeight: 600, fontSize: 15 }}>Matches</span>
+        </button>
+        <button
+          onClick={() => setShowAuditLog(true)}
+          aria-label="Open change history"
+          className="absolute top-3 right-3 flex items-center justify-center rounded-full"
+          style={{ width: 24, height: 24, background: 'rgba(255,255,255,0.06)', color: 'rgba(255,255,255,0.08)' }}
+        >
+          <Eye size={12} />
         </button>
         <div className="rounded-2xl p-4" style={{ background: 'rgba(255,255,255,0.12)' }}>
           <div className="flex items-start justify-between mb-3">
@@ -411,10 +463,58 @@ export function MatchDetails({ id }: Props) {
       {/* Bottom Action Area */}
       <div className="fixed bottom-0 left-1/2 -translate-x-1/2 w-full max-w-[430px] px-4 pb-6 pt-3" style={{ background: 'rgba(247,247,247,0.95)', backdropFilter: 'blur(10px)', borderTop: '1px solid #EAEAEA' }}>
         {showAddPlayer && (
-          <div className="flex gap-2 mb-3">
-            <input className="flex-1 rounded-xl px-4 py-3 outline-none" style={{ background: '#fff', border: '1.5px solid #0F5132', color: '#111', fontWeight: 500 }} placeholder="Player name" value={newPlayerName} onChange={e => setNewPlayerName(e.target.value)} onKeyDown={e => e.key === 'Enter' && handleAddPlayer()} autoFocus />
-            <button onClick={handleAddPlayer} className="rounded-xl px-4 flex items-center justify-center" style={{ background: '#0F5132', color: '#fff' }}><Check size={20} /></button>
-            <button onClick={() => { setShowAddPlayer(false); setNewPlayerName(''); }} className="rounded-xl px-4 flex items-center justify-center" style={{ background: '#EAEAEA', color: '#555' }}><X size={20} /></button>
+          <div className="space-y-2 mb-3">
+            <input
+              className="w-full rounded-xl px-4 py-3 outline-none"
+              style={{ background: '#fff', border: '1.5px solid #0F5132', color: '#111', fontWeight: 500 }}
+              placeholder="Player name"
+              value={newPlayerName}
+              onChange={e => {
+                setNewPlayerName(e.target.value);
+                if (addPlayerError) setAddPlayerError('');
+              }}
+              onKeyDown={e => e.key === 'Enter' && handleAddPlayer()}
+              autoFocus
+            />
+            <input
+              type="password"
+              inputMode="numeric"
+              maxLength={4}
+              className="w-full rounded-xl px-4 py-3 outline-none"
+              style={{ background: '#fff', border: '1.5px solid #0F5132', color: '#111', fontWeight: 600, letterSpacing: 2 }}
+              placeholder="Player PIN (optional)"
+              value={newPlayerPin}
+              onChange={e => {
+                setNewPlayerPin(e.target.value.replace(/\D/g, '').slice(0, 4));
+                if (addPlayerError) setAddPlayerError('');
+              }}
+              onKeyDown={e => e.key === 'Enter' && handleAddPlayer()}
+            />
+            <p style={{ color: '#666', fontSize: 12 }}>
+              Optional: set a 4-digit PIN you can share with this player.
+            </p>
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                onClick={handleAddPlayer}
+                className="rounded-xl py-2.5 transition-all active:scale-95"
+                style={{ background: '#0F5132', color: '#fff', fontWeight: 700, fontSize: 14 }}
+              >
+                Add Player
+              </button>
+              <button
+                onClick={() => {
+                  setShowAddPlayer(false);
+                  setNewPlayerName('');
+                  setNewPlayerPin('');
+                  setAddPlayerError('');
+                }}
+                className="rounded-xl py-2.5 transition-all active:scale-95"
+                style={{ background: '#EAEAEA', color: '#555', fontWeight: 700, fontSize: 14 }}
+              >
+                Cancel
+              </button>
+            </div>
+            {addPlayerError && <p style={{ color: '#dc2626', fontSize: 12, fontWeight: 500 }}>{addPlayerError}</p>}
           </div>
         )}
         {showJoin && (
@@ -426,21 +526,34 @@ export function MatchDetails({ id }: Props) {
               value={joinName}
               onChange={e => { setJoinName(e.target.value); if (joinError) setJoinError(''); }}
               autoFocus
+              onKeyDown={e => e.key === 'Enter' && handleJoin()}
             />
-            <div className="flex gap-2">
-              <input
-                type="password"
-                inputMode="numeric"
-                maxLength={4}
-                className="flex-1 rounded-xl px-4 py-3 outline-none"
-                style={{ background: '#fff', border: '1.5px solid #1DB954', color: '#111', fontWeight: 600, letterSpacing: 2 }}
-                placeholder="Your 4-digit PIN"
-                value={joinPin}
-                onChange={e => { setJoinPin(e.target.value.replace(/\D/g, '').slice(0, 4)); if (joinError) setJoinError(''); }}
-                onKeyDown={e => e.key === 'Enter' && handleJoin()}
-              />
-              <button onClick={handleJoin} className="rounded-xl px-4 flex items-center justify-center" style={{ background: '#1DB954', color: '#fff' }}><Check size={20} /></button>
-              <button onClick={() => { setShowJoin(false); setJoinName(''); setJoinPin(''); setJoinError(''); }} className="rounded-xl px-4 flex items-center justify-center" style={{ background: '#EAEAEA', color: '#555' }}><X size={20} /></button>
+            <input
+              type="password"
+              inputMode="numeric"
+              maxLength={4}
+              className="w-full rounded-xl px-4 py-3 outline-none"
+              style={{ background: '#fff', border: '1.5px solid #1DB954', color: '#111', fontWeight: 600, letterSpacing: 2 }}
+              placeholder="Your 4-digit PIN"
+              value={joinPin}
+              onChange={e => { setJoinPin(e.target.value.replace(/\D/g, '').slice(0, 4)); if (joinError) setJoinError(''); }}
+              onKeyDown={e => e.key === 'Enter' && handleJoin()}
+            />
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                onClick={handleJoin}
+                className="rounded-xl py-2.5 transition-all active:scale-95"
+                style={{ background: '#1DB954', color: '#fff', fontWeight: 700, fontSize: 14 }}
+              >
+                Join Match
+              </button>
+              <button
+                onClick={() => { setShowJoin(false); setJoinName(''); setJoinPin(''); setJoinError(''); }}
+                className="rounded-xl py-2.5 transition-all active:scale-95"
+                style={{ background: '#EAEAEA', color: '#555', fontWeight: 700, fontSize: 14 }}
+              >
+                Cancel
+              </button>
             </div>
             {joinError && <p style={{ color: '#dc2626', fontSize: 12, fontWeight: 500 }}>{joinError}</p>}
           </div>
@@ -517,37 +630,74 @@ export function MatchDetails({ id }: Props) {
           </div>
         )}
 
-        <div className="grid grid-cols-2 gap-2 mb-2">
-          <button
-            onClick={() => {
-              const nextShowJoin = !showJoin;
-              setShowJoin(nextShowJoin);
-              setShowAddPlayer(false);
+        {!showAddPlayer && !showJoin && (
+          <div className="grid grid-cols-2 gap-2 mb-2">
+            <button
+              onClick={() => {
+                if (isJoinAddBlocked) {
+                  setActionNotice(blockedActionMessage);
+                  setShowJoin(false);
+                  setShowAddPlayer(false);
+                  setShowLeave(false);
+                  return;
+                }
+                setActionNotice('');
+                setAddPlayerError('');
+                setNewPlayerName('');
+                setNewPlayerPin('');
+                const nextShowJoin = !showJoin;
+                setShowJoin(nextShowJoin);
+                setShowAddPlayer(false);
+                setShowLeave(false);
+                if (!nextShowJoin) {
+                  setJoinName('');
+                  setJoinPin('');
+                  setJoinError('');
+                }
+              }}
+              className="rounded-xl py-3 flex items-center justify-center gap-1.5 transition-all active:scale-95"
+              style={{ background: isJoinAddBlocked ? '#EAEAEA' : '#1DB954', color: isJoinAddBlocked ? '#aaa' : '#fff', fontWeight: 700, fontSize: 14 }}>
+              Join Match
+            </button>
+            <button onClick={() => {
+              if (isJoinAddBlocked) {
+                setActionNotice(blockedActionMessage);
+                setShowJoin(false);
+                setShowAddPlayer(false);
+                setShowLeave(false);
+                return;
+              }
+              setActionNotice('');
+              setJoinName('');
+              setJoinPin('');
+              setJoinError('');
+              const nextShowAddPlayer = !showAddPlayer;
+              setShowAddPlayer(nextShowAddPlayer);
+              setShowJoin(false);
               setShowLeave(false);
-              if (!nextShowJoin) {
-                setJoinName('');
-                setJoinPin('');
-                setJoinError('');
+              if (!nextShowAddPlayer) {
+                setNewPlayerName('');
+                setNewPlayerPin('');
+                setAddPlayerError('');
               }
             }}
-            disabled={match.registrationClosed || isFull}
-            className="rounded-xl py-3 flex items-center justify-center gap-1.5 transition-all active:scale-95"
-            style={{ background: match.registrationClosed || isFull ? '#EAEAEA' : '#1DB954', color: match.registrationClosed || isFull ? '#aaa' : '#fff', fontWeight: 700, fontSize: 14 }}>
-            Join Match
-          </button>
-          <button onClick={() => { setShowAddPlayer(!showAddPlayer); setShowJoin(false); setShowLeave(false); }}
-            disabled={match.registrationClosed}
-            className="rounded-xl py-3 flex items-center justify-center gap-1.5 transition-all active:scale-95"
-            style={{
-              background: match.registrationClosed ? '#EAEAEA' : '#F0FAF4',
-              color: match.registrationClosed ? '#aaa' : '#0F5132',
-              fontWeight: 700,
-              fontSize: 14,
-              border: match.registrationClosed ? '1.5px solid #DADADA' : '1.5px solid #0F5132',
-            }}>
-            <UserPlus size={16} /> Add Player
-          </button>
-        </div>
+              className="rounded-xl py-3 flex items-center justify-center gap-1.5 transition-all active:scale-95"
+              style={{
+                background: isJoinAddBlocked ? '#EAEAEA' : '#F0FAF4',
+                color: isJoinAddBlocked ? '#aaa' : '#0F5132',
+                fontWeight: 700,
+                fontSize: 14,
+                border: isJoinAddBlocked ? '1.5px solid #DADADA' : '1.5px solid #0F5132',
+              }}>
+              <UserPlus size={16} /> Add Player
+            </button>
+          </div>
+        )}
+        {actionNotice && (
+          <p className="mb-2" style={{ color: '#dc2626', fontSize: 12, fontWeight: 600 }}>
+            {actionNotice}
+          </p>
+        )}
         <div className="grid grid-cols-4 gap-2">
           <button onClick={handleToggleRegistration}
             className="rounded-xl py-3 flex items-center justify-center gap-1 transition-all active:scale-95"
@@ -584,6 +734,44 @@ export function MatchDetails({ id }: Props) {
 
       {showImport && (
         <ImportMatchModal onClose={() => setShowImport(false)} preselectedMatchId={id} />
+      )}
+
+      {showAuditLog && (
+        <div className="fixed inset-0 z-50 flex items-end justify-center px-0 sm:px-4" style={{ background: 'rgba(0,0,0,0.45)' }}>
+          <div className="w-full max-w-[430px] rounded-t-3xl sm:rounded-2xl p-5" style={{ background: '#fff', maxHeight: '70vh', overflowY: 'auto' }}>
+            <div className="flex items-center justify-between mb-3">
+              <h3 style={{ fontWeight: 800, fontSize: 18, color: '#111' }}>Change History</h3>
+              <button
+                onClick={() => setShowAuditLog(false)}
+                className="rounded-lg px-2 py-1"
+                style={{ background: '#F2F2F2', color: '#555' }}
+              >
+                <X size={16} />
+              </button>
+            </div>
+            {sortedAuditLog.length === 0 ? (
+              <p style={{ color: '#777', fontSize: 14 }}>No changes tracked yet.</p>
+            ) : (
+              <div className="space-y-2">
+                {sortedAuditLog.map(entry => (
+                  <div key={entry.id} className="rounded-xl p-3" style={{ background: '#F9F9F9', border: '1px solid #EAEAEA' }}>
+                    <p style={{ color: '#111', fontWeight: 700, fontSize: 13 }}>
+                      {entry.actor} - {entry.action}
+                    </p>
+                    {entry.details && (
+                      <p style={{ color: '#555', fontSize: 13, marginTop: 4 }}>
+                        {entry.details}
+                      </p>
+                    )}
+                    <p style={{ color: '#999', fontSize: 11, marginTop: 6 }}>
+                      {formatAuditTime(entry)}
+                    </p>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
       )}
 
       {statusConfirmPlayer && statusTarget && (

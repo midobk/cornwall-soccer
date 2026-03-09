@@ -6,6 +6,14 @@ import { ParsedMatch } from '../utils/parseMatchText';
 export type PaymentStatus = 'paid' | 'unpaid' | 'cash';
 export type TeamId = 'A' | 'B' | null;
 
+export interface MatchAuditEntry {
+  id: string;
+  at: number;
+  action: string;
+  actor: string;
+  details: string;
+}
+
 export interface Player {
   id: string;
   name: string;
@@ -28,6 +36,7 @@ export interface Match {
   players: Player[];
   registrationPin: string;
   registrationClosed: boolean;
+  auditLog: MatchAuditEntry[];
 }
 
 interface MatchDocument {
@@ -43,6 +52,7 @@ interface MatchDocument {
   players: Player[];
   registrationPin: string;
   registrationClosed: boolean;
+  auditLog: MatchAuditEntry[];
   createdAt?: number;
   updatedAt?: number;
 }
@@ -82,7 +92,7 @@ interface AppContextType {
   navigate: (s: Screen) => void;
   // data
   matches: Match[];
-  addMatch: (match: Omit<Match, 'id' | 'players' | 'registrationClosed'>) => void;
+  addMatch: (match: Omit<Match, 'id' | 'players' | 'registrationClosed' | 'auditLog'>) => void;
   updateMatch: (match: Match) => void;
   addPlayer: (matchId: string, name: string, joinPin?: string | null) => void;
   updatePlayerStatus: (matchId: string, playerId: string, status: PaymentStatus, pin: string) => boolean;
@@ -134,6 +144,7 @@ const initialMatches: Match[] = [
     players: mockPlayers,
     registrationPin: '1234',
     registrationClosed: false,
+    auditLog: [],
   },
   {
     id: '2',
@@ -153,6 +164,7 @@ const initialMatches: Match[] = [
     ],
     registrationPin: '1234',
     registrationClosed: false,
+    auditLog: [],
   },
 ];
 
@@ -176,6 +188,18 @@ const pinOr = (value: unknown): string =>
 const optionalPinOr = (value: unknown): string | null =>
   typeof value === 'string' && /^\d{4}$/.test(value) ? value : null;
 
+function normalizeAuditEntry(raw: unknown, fallbackId: string): MatchAuditEntry | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const value = raw as Record<string, unknown>;
+  return {
+    id: stringOr(value.id, fallbackId),
+    at: numberOr(value.at, Date.now()),
+    action: stringOr(value.action, 'Update'),
+    actor: stringOr(value.actor, 'Unknown'),
+    details: stringOr(value.details, ''),
+  };
+}
+
 function normalizePlayer(raw: unknown, fallbackId: string): Player {
   if (!raw || typeof raw !== 'object') {
     return { id: fallbackId, name: 'Player', status: 'unpaid', team: null, joinPin: null };
@@ -192,6 +216,7 @@ function normalizePlayer(raw: unknown, fallbackId: string): Player {
 
 function normalizeMatch(id: string, raw: Record<string, unknown>): Match {
   const playersRaw = Array.isArray(raw.players) ? raw.players : [];
+  const auditLogRaw = Array.isArray(raw.auditLog) ? raw.auditLog : [];
   return {
     id,
     name: stringOr(raw.name, 'Untitled Match'),
@@ -206,6 +231,9 @@ function normalizeMatch(id: string, raw: Record<string, unknown>): Match {
     players: playersRaw.map((player, idx) => normalizePlayer(player, `player-${id}-${idx}`)),
     registrationPin: pinOr(raw.registrationPin),
     registrationClosed: Boolean(raw.registrationClosed),
+    auditLog: auditLogRaw
+      .map((entry, idx) => normalizeAuditEntry(entry, `audit-${id}-${idx}`))
+      .filter((entry): entry is MatchAuditEntry => entry !== null),
   };
 }
 
@@ -223,7 +251,32 @@ function toMatchDocument(match: Match): MatchDocument {
     players: match.players,
     registrationPin: match.registrationPin,
     registrationClosed: match.registrationClosed,
+    auditLog: match.auditLog,
   };
+}
+
+const MAX_AUDIT_ENTRIES = 150;
+
+function createAuditEntry(action: string, actor: string, details: string): MatchAuditEntry {
+  return {
+    id: `audit-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    at: Date.now(),
+    action,
+    actor,
+    details,
+  };
+}
+
+function appendAudit(match: Match, entry: Omit<MatchAuditEntry, 'id' | 'at'>): Match {
+  const nextAuditLog = [...match.auditLog, createAuditEntry(entry.action, entry.actor, entry.details)]
+    .slice(-MAX_AUDIT_ENTRIES);
+  return { ...match, auditLog: nextAuditLog };
+}
+
+function resolveActorByPin(match: Match, pin: string): string {
+  if (pin === match.registrationPin) return 'Match PIN holder';
+  const player = match.players.find((value) => value.joinPin !== null && value.joinPin === pin);
+  return player ? `${player.name} (player PIN)` : 'Unknown';
 }
 
 // ─── Provider ─────────────────────────────────────────────────────────────────
@@ -273,8 +326,11 @@ export function AppProvider({ children }: { children?: ReactNode }) {
     });
   };
 
-  const addMatch = (data: Omit<Match, 'id' | 'players' | 'registrationClosed'>) => {
-    const newMatch: Match = { ...data, id: buildMatchId(), players: [], registrationClosed: false };
+  const addMatch = (data: Omit<Match, 'id' | 'players' | 'registrationClosed' | 'auditLog'>) => {
+    const newMatch = appendAudit(
+      { ...data, id: buildMatchId(), players: [], registrationClosed: false, auditLog: [] },
+      { action: 'Match created', actor: 'Match creator', details: 'Created this match.' }
+    );
     setMatches(prev => [newMatch, ...prev]);
     persistMatch(newMatch, true);
   };
@@ -301,9 +357,14 @@ export function AppProvider({ children }: { children?: ReactNode }) {
       })),
       registrationPin: '0000',
       registrationClosed: false,
+      auditLog: [],
     };
-    setMatches(prev => [newMatch, ...prev]);
-    persistMatch(newMatch, true);
+    const loggedMatch = appendAudit(
+      newMatch,
+      { action: 'Match imported', actor: 'Import tool', details: 'Created from imported text.' }
+    );
+    setMatches(prev => [loggedMatch, ...prev]);
+    persistMatch(loggedMatch, true);
     return id;
   };
 
@@ -359,7 +420,17 @@ export function AppProvider({ children }: { children?: ReactNode }) {
       players: updatedPlayers,
     };
 
-    updateMatch(updatedMatch);
+    const loggedMatch = appendAudit(
+      updatedMatch,
+      {
+        action: 'Match imported',
+        actor: 'Import tool',
+        details: replacePlayers
+          ? 'Imported details and replaced players.'
+          : 'Imported details and merged players.',
+      }
+    );
+    updateMatch(loggedMatch);
   };
 
   const updateMatch = (updated: Match) => {
@@ -370,13 +441,21 @@ export function AppProvider({ children }: { children?: ReactNode }) {
   const addPlayer = (matchId: string, name: string, joinPin: string | null = null) => {
     const match = matches.find((value) => value.id === matchId);
     if (!match) return;
-    const updatedMatch: Match = {
+    const playerName = name.trim();
+    if (!playerName) return;
+    const updatedMatch = appendAudit({
       ...match,
       players: [
         ...match.players,
-        { id: `player-${Date.now()}`, name: name.trim(), status: 'unpaid', team: null, joinPin },
+        { id: `player-${Date.now()}`, name: playerName, status: 'unpaid', team: null, joinPin },
       ],
-    };
+    }, {
+      action: joinPin ? 'Player joined' : 'Player added',
+      actor: joinPin ? playerName : 'Match PIN holder',
+      details: joinPin
+        ? `${playerName} joined the match.`
+        : `${playerName} was added by organizer.`,
+    });
     updateMatch(updatedMatch);
   };
 
@@ -389,12 +468,16 @@ export function AppProvider({ children }: { children?: ReactNode }) {
       pin === match.registrationPin ||
       (targetPlayer.joinPin !== null && targetPlayer.joinPin === pin);
     if (!canUpdate) return false;
-    const updatedMatch: Match = {
+    const updatedMatch = appendAudit({
       ...match,
       players: match.players.map((player) =>
         player.id === playerId ? { ...player, status } : player
       ),
-    };
+    }, {
+      action: 'Status updated',
+      actor: resolveActorByPin(match, pin),
+      details: `${targetPlayer.name}: ${targetPlayer.status} -> ${status}.`,
+    });
     updateMatch(updatedMatch);
     return true;
   };
@@ -408,10 +491,14 @@ export function AppProvider({ children }: { children?: ReactNode }) {
       pin === match.registrationPin ||
       (targetPlayer.joinPin !== null && targetPlayer.joinPin === pin);
     if (!canRemove) return false;
-    const updatedMatch: Match = {
+    const updatedMatch = appendAudit({
       ...match,
       players: match.players.filter((player) => player.id !== playerId),
-    };
+    }, {
+      action: 'Player removed',
+      actor: resolveActorByPin(match, pin),
+      details: `${targetPlayer.name} was removed from the match.`,
+    });
     updateMatch(updatedMatch);
     return true;
   };
@@ -419,14 +506,22 @@ export function AppProvider({ children }: { children?: ReactNode }) {
   const closeRegistration = (matchId: string, pin: string): boolean => {
     const match = matches.find((value) => value.id === matchId);
     if (!match || match.registrationPin !== pin) return false;
-    updateMatch({ ...match, registrationClosed: true });
+    const updatedMatch = appendAudit(
+      { ...match, registrationClosed: true },
+      { action: 'Registration closed', actor: 'Match PIN holder', details: 'New registrations are blocked.' }
+    );
+    updateMatch(updatedMatch);
     return true;
   };
 
   const openRegistration = (matchId: string, pin: string): boolean => {
     const match = matches.find((value) => value.id === matchId);
     if (!match || match.registrationPin !== pin) return false;
-    updateMatch({ ...match, registrationClosed: false });
+    const updatedMatch = appendAudit(
+      { ...match, registrationClosed: false },
+      { action: 'Registration opened', actor: 'Match PIN holder', details: 'New registrations are allowed.' }
+    );
+    updateMatch(updatedMatch);
     return true;
   };
 
@@ -445,7 +540,11 @@ export function AppProvider({ children }: { children?: ReactNode }) {
   const setTeams = (matchId: string, players: Player[]) => {
     const match = matches.find((value) => value.id === matchId);
     if (!match) return;
-    updateMatch({ ...match, players });
+    const updatedMatch = appendAudit(
+      { ...match, players },
+      { action: 'Teams updated', actor: 'Organizer', details: 'Player team assignments changed.' }
+    );
+    updateMatch(updatedMatch);
   };
 
   const getMatch = (matchId: string) => matches.find(m => m.id === matchId);
