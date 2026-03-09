@@ -85,7 +85,7 @@ interface AppContextType {
   addMatch: (match: Omit<Match, 'id' | 'players' | 'registrationClosed'>) => void;
   updateMatch: (match: Match) => void;
   addPlayer: (matchId: string, name: string, joinPin?: string | null) => void;
-  updatePlayerStatus: (matchId: string, playerId: string, status: PaymentStatus) => void;
+  updatePlayerStatus: (matchId: string, playerId: string, status: PaymentStatus, pin: string) => boolean;
   removePlayer: (matchId: string, playerId: string, pin: string) => boolean;
   closeRegistration: (matchId: string, pin: string) => boolean;
   openRegistration: (matchId: string, pin: string) => boolean;
@@ -380,9 +380,15 @@ export function AppProvider({ children }: { children?: ReactNode }) {
     updateMatch(updatedMatch);
   };
 
-  const updatePlayerStatus = (matchId: string, playerId: string, status: PaymentStatus) => {
+  const updatePlayerStatus = (matchId: string, playerId: string, status: PaymentStatus, pin: string): boolean => {
     const match = matches.find((value) => value.id === matchId);
-    if (!match) return;
+    if (!match) return false;
+    const targetPlayer = match.players.find((player) => player.id === playerId);
+    if (!targetPlayer) return false;
+    const canUpdate =
+      pin === match.registrationPin ||
+      (targetPlayer.joinPin !== null && targetPlayer.joinPin === pin);
+    if (!canUpdate) return false;
     const updatedMatch: Match = {
       ...match,
       players: match.players.map((player) =>
@@ -390,6 +396,7 @@ export function AppProvider({ children }: { children?: ReactNode }) {
       ),
     };
     updateMatch(updatedMatch);
+    return true;
   };
 
   const removePlayer = (matchId: string, playerId: string, pin: string): boolean => {

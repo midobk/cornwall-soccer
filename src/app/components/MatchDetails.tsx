@@ -20,11 +20,11 @@ interface PlayerCardProps {
   matchId: string;
   expandedPlayerId: string | null;
   onToggleExpand: (id: string | null) => void;
-  onUpdateStatus: (matchId: string, playerId: string, status: PaymentStatus) => void;
+  onStatusRequest: (player: Player, status: PaymentStatus) => void;
   onRemoveRequest: (player: Player) => void;
 }
 
-function PlayerCard({ player, matchId, expandedPlayerId, onToggleExpand, onUpdateStatus, onRemoveRequest }: PlayerCardProps) {
+function PlayerCard({ player, matchId, expandedPlayerId, onToggleExpand, onStatusRequest, onRemoveRequest }: PlayerCardProps) {
   const cfg = STATUS_CONFIG[player.status];
   const isExpanded = expandedPlayerId === player.id;
   return (
@@ -47,7 +47,7 @@ function PlayerCard({ player, matchId, expandedPlayerId, onToggleExpand, onUpdat
           <p style={{ color: '#888', fontSize: 12, fontWeight: 500, marginBottom: 8 }}>Update Status</p>
           <div className="flex gap-2 flex-wrap">
             {(['paid', 'unpaid', 'cash'] as PaymentStatus[]).map(s => (
-              <button key={s} onClick={() => { onUpdateStatus(matchId, player.id, s); onToggleExpand(null); }}
+              <button key={s} onClick={() => { onStatusRequest(player, s); onToggleExpand(null); }}
                 className="rounded-lg px-3 py-1.5 transition-all active:scale-95"
                 style={{ background: player.status === s ? STATUS_CONFIG[s].bg : '#F5F5F5', color: player.status === s ? STATUS_CONFIG[s].color : '#555', fontWeight: 600, fontSize: 13, border: player.status === s ? `1.5px solid ${STATUS_CONFIG[s].color}` : '1.5px solid #EAEAEA' }}>
                 {STATUS_CONFIG[s].icon} {STATUS_CONFIG[s].label}
@@ -72,11 +72,11 @@ interface SectionProps {
   matchId: string;
   expandedPlayerId: string | null;
   onToggleExpand: (id: string | null) => void;
-  onUpdateStatus: (matchId: string, playerId: string, status: PaymentStatus) => void;
+  onStatusRequest: (player: Player, status: PaymentStatus) => void;
   onRemoveRequest: (player: Player) => void;
 }
 
-function Section({ title, emoji, players, matchId, expandedPlayerId, onToggleExpand, onUpdateStatus, onRemoveRequest }: SectionProps) {
+function Section({ title, emoji, players, matchId, expandedPlayerId, onToggleExpand, onStatusRequest, onRemoveRequest }: SectionProps) {
   if (players.length === 0) return null;
   return (
     <div className="mb-5">
@@ -86,7 +86,7 @@ function Section({ title, emoji, players, matchId, expandedPlayerId, onToggleExp
         <span className="rounded-full px-2 py-0.5 ml-1" style={{ background: '#EAEAEA', color: '#555', fontSize: 12, fontWeight: 700 }}>{players.length}</span>
       </div>
       {players.map(p => (
-        <PlayerCard key={p.id} player={p} matchId={matchId} expandedPlayerId={expandedPlayerId} onToggleExpand={onToggleExpand} onUpdateStatus={onUpdateStatus} onRemoveRequest={onRemoveRequest} />
+        <PlayerCard key={p.id} player={p} matchId={matchId} expandedPlayerId={expandedPlayerId} onToggleExpand={onToggleExpand} onStatusRequest={onStatusRequest} onRemoveRequest={onRemoveRequest} />
       ))}
     </div>
   );
@@ -118,6 +118,12 @@ export function MatchDetails({ id }: Props) {
   const [removeConfirmPlayer, setRemoveConfirmPlayer] = useState<Player | null>(null);
   const [removePin, setRemovePin] = useState('');
   const [removeError, setRemoveError] = useState('');
+
+  // Update status flow
+  const [statusConfirmPlayer, setStatusConfirmPlayer] = useState<Player | null>(null);
+  const [statusTarget, setStatusTarget] = useState<PaymentStatus | null>(null);
+  const [statusPin, setStatusPin] = useState('');
+  const [statusError, setStatusError] = useState('');
 
   // Import modal
   const [showImport, setShowImport] = useState(false);
@@ -176,6 +182,30 @@ export function MatchDetails({ id }: Props) {
     setRemoveError('');
   };
 
+  const handleStatusRequest = (player: Player, status: PaymentStatus) => {
+    setStatusConfirmPlayer(player);
+    setStatusTarget(status);
+    setStatusPin('');
+    setStatusError('');
+  };
+
+  const handleStatusConfirm = () => {
+    if (!statusConfirmPlayer || !statusTarget) return;
+    if (!/^\d{4}$/.test(statusPin)) {
+      setStatusError('PIN must be exactly 4 digits.');
+      return;
+    }
+    const success = updatePlayerStatus(match.id, statusConfirmPlayer.id, statusTarget, statusPin);
+    if (!success) {
+      setStatusError('Incorrect PIN.');
+      return;
+    }
+    setStatusConfirmPlayer(null);
+    setStatusTarget(null);
+    setStatusPin('');
+    setStatusError('');
+  };
+
   const handleRemoveConfirm = () => {
     if (!removeConfirmPlayer) return;
     if (!/^\d{4}$/.test(removePin)) {
@@ -196,7 +226,7 @@ export function MatchDetails({ id }: Props) {
     matchId: match.id,
     expandedPlayerId,
     onToggleExpand: setExpandedPlayerId,
-    onUpdateStatus: updatePlayerStatus,
+    onStatusRequest: handleStatusRequest,
     onRemoveRequest: handleRemoveRequest,
   };
 
@@ -304,6 +334,10 @@ export function MatchDetails({ id }: Props) {
       setJoinError('');
       setShowAddPlayer(false);
       setShowImport(false);
+      setStatusConfirmPlayer(null);
+      setStatusTarget(null);
+      setStatusPin('');
+      setStatusError('');
       setRemoveConfirmPlayer(null);
       setRemovePin('');
       setRemoveError('');
@@ -550,6 +584,47 @@ export function MatchDetails({ id }: Props) {
 
       {showImport && (
         <ImportMatchModal onClose={() => setShowImport(false)} preselectedMatchId={id} />
+      )}
+
+      {statusConfirmPlayer && statusTarget && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center px-4" style={{ background: 'rgba(0,0,0,0.45)' }}>
+          <div className="w-full max-w-sm rounded-2xl p-5" style={{ background: '#fff' }}>
+            <h3 style={{ fontWeight: 800, fontSize: 18, color: '#111' }}>Update Status</h3>
+            <p style={{ color: '#666', fontSize: 13, marginTop: 6 }}>
+              Enter {statusConfirmPlayer.name}&apos;s player PIN, or the match PIN, to set status to <span style={{ fontWeight: 700 }}>{STATUS_CONFIG[statusTarget].label}</span>.
+            </p>
+            <input
+              type="password"
+              inputMode="numeric"
+              maxLength={4}
+              autoFocus
+              className="w-full rounded-xl px-4 py-3 mt-3 outline-none"
+              style={{ background: '#fff', border: '1.5px solid #EAEAEA', color: '#111', fontWeight: 600, letterSpacing: 2 }}
+              value={statusPin}
+              onChange={e => {
+                setStatusPin(e.target.value.replace(/\D/g, '').slice(0, 4));
+                if (statusError) setStatusError('');
+              }}
+              onKeyDown={e => e.key === 'Enter' && handleStatusConfirm()}
+              placeholder="••••"
+            />
+            {statusError && <p style={{ color: '#dc2626', fontSize: 12, marginTop: 8 }}>{statusError}</p>}
+            <div className="flex gap-2 mt-4">
+              <button
+                onClick={handleStatusConfirm}
+                className="flex-1 rounded-xl py-2.5 transition-all active:scale-95"
+                style={{ background: '#0F5132', color: '#fff', fontWeight: 700 }}>
+                Confirm
+              </button>
+              <button
+                onClick={() => { setStatusConfirmPlayer(null); setStatusTarget(null); setStatusPin(''); setStatusError(''); }}
+                className="flex-1 rounded-xl py-2.5 transition-all active:scale-95"
+                style={{ background: '#EAEAEA', color: '#555', fontWeight: 700 }}>
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {removeConfirmPlayer && (
