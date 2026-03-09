@@ -133,6 +133,7 @@ export function MatchDetails({ id }: Props) {
   const isFull        = match.players.length >= match.maxPlayers;
 
   const handleAddPlayer = () => {
+    if (match.registrationClosed) return;
     if (!newPlayerName.trim()) return;
     addPlayer(match.id, newPlayerName);
     setNewPlayerName('');
@@ -140,6 +141,7 @@ export function MatchDetails({ id }: Props) {
   };
 
   const handleJoin = () => {
+    if (match.registrationClosed || isFull) return;
     if (!joinName.trim()) return;
     addPlayer(match.id, joinName);
     setJoinName('');
@@ -223,6 +225,11 @@ export function MatchDetails({ id }: Props) {
     if (!success) {
       setPinError('Incorrect PIN.');
       return;
+    }
+    if (pinAction === 'close') {
+      setShowJoin(false);
+      setShowAddPlayer(false);
+      setShowImport(false);
     }
     resetPinPrompt();
   };
@@ -374,8 +381,15 @@ export function MatchDetails({ id }: Props) {
             Join Match
           </button>
           <button onClick={() => { setShowAddPlayer(!showAddPlayer); setShowJoin(false); setShowLeave(false); }}
+            disabled={match.registrationClosed}
             className="rounded-xl py-3 flex items-center justify-center gap-1.5 transition-all active:scale-95"
-            style={{ background: '#F0FAF4', color: '#0F5132', fontWeight: 700, fontSize: 14, border: '1.5px solid #0F5132' }}>
+            style={{
+              background: match.registrationClosed ? '#EAEAEA' : '#F0FAF4',
+              color: match.registrationClosed ? '#aaa' : '#0F5132',
+              fontWeight: 700,
+              fontSize: 14,
+              border: match.registrationClosed ? '1.5px solid #DADADA' : '1.5px solid #0F5132',
+            }}>
             <UserPlus size={16} /> Add Player
           </button>
         </div>
@@ -387,8 +401,15 @@ export function MatchDetails({ id }: Props) {
           </button>
           <button
             onClick={() => { setShowImport(true); }}
+            disabled={match.registrationClosed}
             className="rounded-xl py-3 flex items-center justify-center gap-1 transition-all active:scale-95"
-            style={{ background: '#EFF6FF', color: '#1d4ed8', fontWeight: 700, fontSize: 12, border: '1.5px solid #bfdbfe' }}>
+            style={{
+              background: match.registrationClosed ? '#EAEAEA' : '#EFF6FF',
+              color: match.registrationClosed ? '#aaa' : '#1d4ed8',
+              fontWeight: 700,
+              fontSize: 12,
+              border: match.registrationClosed ? '1.5px solid #DADADA' : '1.5px solid #bfdbfe',
+            }}>
             <FileText size={13} /> Import
           </button>
           <button
