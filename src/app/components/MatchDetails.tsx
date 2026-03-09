@@ -95,7 +95,7 @@ function Section({ title, emoji, players, matchId, expandedPlayerId, onToggleExp
 interface Props { id: string; }
 
 export function MatchDetails({ id }: Props) {
-  const { navigate, getMatch, addPlayer, updatePlayerStatus, removePlayer, closeRegistration, openRegistration } = useAppStore();
+  const { navigate, getMatch, addPlayer, updatePlayerStatus, removePlayer, closeRegistration, openRegistration, deleteMatch } = useAppStore();
   const match = getMatch(id);
 
   const [showAddPlayer, setShowAddPlayer] = useState(false);
@@ -116,7 +116,7 @@ export function MatchDetails({ id }: Props) {
   const [showPinPrompt, setShowPinPrompt] = useState(false);
   const [registrationPinInput, setRegistrationPinInput] = useState('');
   const [pinError, setPinError] = useState('');
-  const [pinAction, setPinAction] = useState<'open' | 'close' | null>(null);
+  const [pinAction, setPinAction] = useState<'open' | 'close' | 'delete' | null>(null);
 
   if (!match) {
     return (
@@ -212,18 +212,31 @@ export function MatchDetails({ id }: Props) {
     setPinError('');
   };
 
+  const handleDeleteMatchRequest = () => {
+    setPinAction('delete');
+    setShowPinPrompt(true);
+    setRegistrationPinInput('');
+    setPinError('');
+  };
+
   const handlePinConfirm = () => {
     if (!pinAction) return;
     if (!/^\d{4}$/.test(registrationPinInput)) {
       setPinError('PIN must be exactly 4 digits.');
       return;
     }
-    const success =
-      pinAction === 'open'
-        ? openRegistration(match.id, registrationPinInput)
-        : closeRegistration(match.id, registrationPinInput);
+    const success = pinAction === 'open'
+      ? openRegistration(match.id, registrationPinInput)
+      : pinAction === 'close'
+        ? closeRegistration(match.id, registrationPinInput)
+        : deleteMatch(match.id, registrationPinInput);
     if (!success) {
       setPinError('Incorrect PIN.');
+      return;
+    }
+    if (pinAction === 'delete') {
+      resetPinPrompt();
+      navigate({ name: 'list' });
       return;
     }
     if (pinAction === 'close') {
@@ -393,7 +406,7 @@ export function MatchDetails({ id }: Props) {
             <UserPlus size={16} /> Add Player
           </button>
         </div>
-        <div className="grid grid-cols-3 gap-2">
+        <div className="grid grid-cols-4 gap-2">
           <button onClick={handleToggleRegistration}
             className="rounded-xl py-3 flex items-center justify-center gap-1 transition-all active:scale-95"
             style={{ background: '#EAEAEA', color: '#333', fontWeight: 700, fontSize: 12 }}>
@@ -418,6 +431,12 @@ export function MatchDetails({ id }: Props) {
             style={{ background: '#FEF2F2', color: '#dc2626', fontWeight: 700, fontSize: 12, border: '1px solid #fecaca' }}>
             <LogOut size={13} /> Leave
           </button>
+          <button
+            onClick={handleDeleteMatchRequest}
+            className="rounded-xl py-3 flex items-center justify-center gap-1 transition-all active:scale-95"
+            style={{ background: '#DC2626', color: '#fff', fontWeight: 700, fontSize: 12 }}>
+            <Trash2 size={13} /> Delete
+          </button>
         </div>
       </div>
 
@@ -429,9 +448,17 @@ export function MatchDetails({ id }: Props) {
         <div className="fixed inset-0 z-50 flex items-center justify-center px-4" style={{ background: 'rgba(0,0,0,0.45)' }}>
           <div className="w-full max-w-sm rounded-2xl p-5" style={{ background: '#fff' }}>
             <h3 style={{ fontWeight: 800, fontSize: 18, color: '#111' }}>
-              {pinAction === 'open' ? 'Open Registration' : 'Close Registration'}
+              {pinAction === 'open'
+                ? 'Open Registration'
+                : pinAction === 'close'
+                  ? 'Close Registration'
+                  : 'Delete Match'}
             </h3>
-            <p style={{ color: '#666', fontSize: 13, marginTop: 6 }}>Enter the 4-digit match PIN.</p>
+            <p style={{ color: '#666', fontSize: 13, marginTop: 6 }}>
+              {pinAction === 'delete'
+                ? 'Enter the 4-digit PIN to permanently delete this match.'
+                : 'Enter the 4-digit match PIN.'}
+            </p>
             <input
               type="password"
               inputMode="numeric"
@@ -452,7 +479,7 @@ export function MatchDetails({ id }: Props) {
               <button
                 onClick={handlePinConfirm}
                 className="flex-1 rounded-xl py-2.5 transition-all active:scale-95"
-                style={{ background: '#0F5132', color: '#fff', fontWeight: 700 }}>
+                style={{ background: pinAction === 'delete' ? '#DC2626' : '#0F5132', color: '#fff', fontWeight: 700 }}>
                 Confirm
               </button>
               <button

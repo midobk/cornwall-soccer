@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useEffect, useState, ReactNode } from 'react';
-import { collection, doc, onSnapshot, orderBy, query, setDoc } from 'firebase/firestore';
+import { collection, deleteDoc, doc, onSnapshot, orderBy, query, setDoc } from 'firebase/firestore';
 import { firestoreDb, isFirebaseConfigured } from '../lib/firebase';
 import { ParsedMatch } from '../utils/parseMatchText';
 
@@ -88,6 +88,7 @@ interface AppContextType {
   removePlayer: (matchId: string, playerId: string) => void;
   closeRegistration: (matchId: string, pin: string) => boolean;
   openRegistration: (matchId: string, pin: string) => boolean;
+  deleteMatch: (matchId: string, pin: string) => boolean;
   setTeams: (matchId: string, players: Player[]) => void;
   getMatch: (matchId: string) => Match | undefined;
   // import helpers
@@ -407,6 +408,18 @@ export function AppProvider({ children }: { children?: ReactNode }) {
     return true;
   };
 
+  const deleteMatch = (matchId: string, pin: string): boolean => {
+    const match = matches.find((value) => value.id === matchId);
+    if (!match || match.registrationPin !== pin) return false;
+    setMatches(prev => prev.filter((value) => value.id !== matchId));
+    if (firestoreDb) {
+      void deleteDoc(doc(firestoreDb, 'matches', matchId)).catch((error) => {
+        console.error(`Failed to delete match ${matchId}:`, error);
+      });
+    }
+    return true;
+  };
+
   const setTeams = (matchId: string, players: Player[]) => {
     const match = matches.find((value) => value.id === matchId);
     if (!match) return;
@@ -420,7 +433,7 @@ export function AppProvider({ children }: { children?: ReactNode }) {
       value={{
         screen, navigate,
         matches, addMatch, updateMatch, addPlayer, updatePlayerStatus,
-        removePlayer, closeRegistration, openRegistration, setTeams, getMatch,
+        removePlayer, closeRegistration, openRegistration, deleteMatch, setTeams, getMatch,
         importNewMatch, applyImportToMatch,
       }}
     >
