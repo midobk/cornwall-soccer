@@ -21,10 +21,10 @@ interface PlayerCardProps {
   expandedPlayerId: string | null;
   onToggleExpand: (id: string | null) => void;
   onUpdateStatus: (matchId: string, playerId: string, status: PaymentStatus) => void;
-  onRemove: (matchId: string, playerId: string) => void;
+  onRemoveRequest: (player: Player) => void;
 }
 
-function PlayerCard({ player, matchId, expandedPlayerId, onToggleExpand, onUpdateStatus, onRemove }: PlayerCardProps) {
+function PlayerCard({ player, matchId, expandedPlayerId, onToggleExpand, onUpdateStatus, onRemoveRequest }: PlayerCardProps) {
   const cfg = STATUS_CONFIG[player.status];
   const isExpanded = expandedPlayerId === player.id;
   return (
@@ -53,7 +53,7 @@ function PlayerCard({ player, matchId, expandedPlayerId, onToggleExpand, onUpdat
                 {STATUS_CONFIG[s].icon} {STATUS_CONFIG[s].label}
               </button>
             ))}
-            <button onClick={() => { onRemove(matchId, player.id); onToggleExpand(null); }}
+            <button onClick={() => { onRemoveRequest(player); onToggleExpand(null); }}
               className="rounded-lg px-3 py-1.5 flex items-center gap-1 transition-all active:scale-95"
               style={{ background: '#FEF2F2', color: '#dc2626', fontWeight: 600, fontSize: 13, border: '1.5px solid #fecaca' }}>
               <Trash2 size={13} /> Remove
@@ -73,10 +73,10 @@ interface SectionProps {
   expandedPlayerId: string | null;
   onToggleExpand: (id: string | null) => void;
   onUpdateStatus: (matchId: string, playerId: string, status: PaymentStatus) => void;
-  onRemove: (matchId: string, playerId: string) => void;
+  onRemoveRequest: (player: Player) => void;
 }
 
-function Section({ title, emoji, players, matchId, expandedPlayerId, onToggleExpand, onUpdateStatus, onRemove }: SectionProps) {
+function Section({ title, emoji, players, matchId, expandedPlayerId, onToggleExpand, onUpdateStatus, onRemoveRequest }: SectionProps) {
   if (players.length === 0) return null;
   return (
     <div className="mb-5">
@@ -86,7 +86,7 @@ function Section({ title, emoji, players, matchId, expandedPlayerId, onToggleExp
         <span className="rounded-full px-2 py-0.5 ml-1" style={{ background: '#EAEAEA', color: '#555', fontSize: 12, fontWeight: 700 }}>{players.length}</span>
       </div>
       {players.map(p => (
-        <PlayerCard key={p.id} player={p} matchId={matchId} expandedPlayerId={expandedPlayerId} onToggleExpand={onToggleExpand} onUpdateStatus={onUpdateStatus} onRemove={onRemove} />
+        <PlayerCard key={p.id} player={p} matchId={matchId} expandedPlayerId={expandedPlayerId} onToggleExpand={onToggleExpand} onUpdateStatus={onUpdateStatus} onRemoveRequest={onRemoveRequest} />
       ))}
     </div>
   );
@@ -101,15 +101,23 @@ export function MatchDetails({ id }: Props) {
   const [showAddPlayer, setShowAddPlayer] = useState(false);
   const [newPlayerName, setNewPlayerName] = useState('');
   const [joinName, setJoinName] = useState('');
+  const [joinPin, setJoinPin] = useState('');
+  const [joinError, setJoinError] = useState('');
   const [showJoin, setShowJoin] = useState(false);
   const [expandedPlayerId, setExpandedPlayerId] = useState<string | null>(null);
 
   // Leave Match flow
   const [showLeave, setShowLeave]         = useState(false);
   const [leaveName, setLeaveName]         = useState('');
+  const [leavePin, setLeavePin]           = useState('');
   const [leaveConfirmPlayer, setLeaveConfirmPlayer] = useState<Player | null>(null);
   const [leaveError, setLeaveError]       = useState('');
   const [leaveSuccess, setLeaveSuccess]   = useState('');
+
+  // Remove player flow
+  const [removeConfirmPlayer, setRemoveConfirmPlayer] = useState<Player | null>(null);
+  const [removePin, setRemovePin] = useState('');
+  const [removeError, setRemoveError] = useState('');
 
   // Import modal
   const [showImport, setShowImport] = useState(false);
@@ -142,9 +150,18 @@ export function MatchDetails({ id }: Props) {
 
   const handleJoin = () => {
     if (match.registrationClosed || isFull) return;
-    if (!joinName.trim()) return;
-    addPlayer(match.id, joinName);
+    if (!joinName.trim()) {
+      setJoinError('Name is required.');
+      return;
+    }
+    if (!/^\d{4}$/.test(joinPin)) {
+      setJoinError('PIN must be exactly 4 digits.');
+      return;
+    }
+    addPlayer(match.id, joinName, joinPin);
     setJoinName('');
+    setJoinPin('');
+    setJoinError('');
     setShowJoin(false);
   };
 
@@ -153,7 +170,35 @@ export function MatchDetails({ id }: Props) {
     return d.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' });
   };
 
-  const sectionProps = { matchId: match.id, expandedPlayerId, onToggleExpand: setExpandedPlayerId, onUpdateStatus: updatePlayerStatus, onRemove: removePlayer };
+  const handleRemoveRequest = (player: Player) => {
+    setRemoveConfirmPlayer(player);
+    setRemovePin('');
+    setRemoveError('');
+  };
+
+  const handleRemoveConfirm = () => {
+    if (!removeConfirmPlayer) return;
+    if (!/^\d{4}$/.test(removePin)) {
+      setRemoveError('PIN must be exactly 4 digits.');
+      return;
+    }
+    const success = removePlayer(match.id, removeConfirmPlayer.id, removePin);
+    if (!success) {
+      setRemoveError('Incorrect PIN.');
+      return;
+    }
+    setRemoveConfirmPlayer(null);
+    setRemovePin('');
+    setRemoveError('');
+  };
+
+  const sectionProps = {
+    matchId: match.id,
+    expandedPlayerId,
+    onToggleExpand: setExpandedPlayerId,
+    onUpdateStatus: updatePlayerStatus,
+    onRemoveRequest: handleRemoveRequest,
+  };
 
   const handleLeaveSearch = () => {
     if (!leaveName.trim()) return;
@@ -167,6 +212,7 @@ export function MatchDetails({ id }: Props) {
       );
       if (partial) {
         setLeaveConfirmPlayer(partial);
+        setLeavePin('');
         setLeaveError('');
       } else {
         setLeaveError(`No player named "${leaveName.trim()}" found in this match.`);
@@ -174,16 +220,27 @@ export function MatchDetails({ id }: Props) {
       }
     } else {
       setLeaveConfirmPlayer(found);
+      setLeavePin('');
       setLeaveError('');
     }
   };
 
   const handleLeaveConfirm = () => {
     if (!leaveConfirmPlayer) return;
-    removePlayer(match!.id, leaveConfirmPlayer.id);
+    if (!/^\d{4}$/.test(leavePin)) {
+      setLeaveError('PIN must be exactly 4 digits.');
+      return;
+    }
+    const success = removePlayer(match.id, leaveConfirmPlayer.id, leavePin);
+    if (!success) {
+      setLeaveError('Incorrect PIN.');
+      return;
+    }
     setLeaveSuccess(`${leaveConfirmPlayer.name} has left the match.`);
     setLeaveConfirmPlayer(null);
     setLeaveName('');
+    setLeavePin('');
+    setLeaveError('');
     setTimeout(() => {
       setLeaveSuccess('');
       setShowLeave(false);
@@ -193,6 +250,7 @@ export function MatchDetails({ id }: Props) {
   const resetLeave = () => {
     setShowLeave(false);
     setLeaveName('');
+    setLeavePin('');
     setLeaveConfirmPlayer(null);
     setLeaveError('');
     setLeaveSuccess('');
@@ -241,8 +299,14 @@ export function MatchDetails({ id }: Props) {
     }
     if (pinAction === 'close') {
       setShowJoin(false);
+      setJoinName('');
+      setJoinPin('');
+      setJoinError('');
       setShowAddPlayer(false);
       setShowImport(false);
+      setRemoveConfirmPlayer(null);
+      setRemovePin('');
+      setRemoveError('');
     }
     resetPinPrompt();
   };
@@ -320,10 +384,31 @@ export function MatchDetails({ id }: Props) {
           </div>
         )}
         {showJoin && (
-          <div className="flex gap-2 mb-3">
-            <input className="flex-1 rounded-xl px-4 py-3 outline-none" style={{ background: '#fff', border: '1.5px solid #1DB954', color: '#111', fontWeight: 500 }} placeholder="Your name" value={joinName} onChange={e => setJoinName(e.target.value)} onKeyDown={e => e.key === 'Enter' && handleJoin()} autoFocus />
-            <button onClick={handleJoin} className="rounded-xl px-4 flex items-center justify-center" style={{ background: '#1DB954', color: '#fff' }}><Check size={20} /></button>
-            <button onClick={() => { setShowJoin(false); setJoinName(''); }} className="rounded-xl px-4 flex items-center justify-center" style={{ background: '#EAEAEA', color: '#555' }}><X size={20} /></button>
+          <div className="space-y-2 mb-3">
+            <input
+              className="w-full rounded-xl px-4 py-3 outline-none"
+              style={{ background: '#fff', border: '1.5px solid #1DB954', color: '#111', fontWeight: 500 }}
+              placeholder="Your name"
+              value={joinName}
+              onChange={e => { setJoinName(e.target.value); if (joinError) setJoinError(''); }}
+              autoFocus
+            />
+            <div className="flex gap-2">
+              <input
+                type="password"
+                inputMode="numeric"
+                maxLength={4}
+                className="flex-1 rounded-xl px-4 py-3 outline-none"
+                style={{ background: '#fff', border: '1.5px solid #1DB954', color: '#111', fontWeight: 600, letterSpacing: 2 }}
+                placeholder="Your 4-digit PIN"
+                value={joinPin}
+                onChange={e => { setJoinPin(e.target.value.replace(/\D/g, '').slice(0, 4)); if (joinError) setJoinError(''); }}
+                onKeyDown={e => e.key === 'Enter' && handleJoin()}
+              />
+              <button onClick={handleJoin} className="rounded-xl px-4 flex items-center justify-center" style={{ background: '#1DB954', color: '#fff' }}><Check size={20} /></button>
+              <button onClick={() => { setShowJoin(false); setJoinName(''); setJoinPin(''); setJoinError(''); }} className="rounded-xl px-4 flex items-center justify-center" style={{ background: '#EAEAEA', color: '#555' }}><X size={20} /></button>
+            </div>
+            {joinError && <p style={{ color: '#dc2626', fontSize: 12, fontWeight: 500 }}>{joinError}</p>}
           </div>
         )}
 
@@ -341,13 +426,24 @@ export function MatchDetails({ id }: Props) {
                   <p style={{ fontSize: 13, color: '#555' }}>
                     Remove <span style={{ fontWeight: 700, color: '#111' }}>{leaveConfirmPlayer.name}</span> from this match?
                   </p>
+                  <input
+                    type="password"
+                    inputMode="numeric"
+                    maxLength={4}
+                    className="w-full rounded-xl px-4 py-2.5 outline-none"
+                    style={{ background: '#F9F9F9', border: '1.5px solid #EAEAEA', color: '#111', fontWeight: 600, fontSize: 14, letterSpacing: 2 }}
+                    placeholder="Your 4-digit PIN"
+                    value={leavePin}
+                    onChange={e => { setLeavePin(e.target.value.replace(/\D/g, '').slice(0, 4)); setLeaveError(''); }}
+                    onKeyDown={e => e.key === 'Enter' && handleLeaveConfirm()}
+                  />
                   <div className="flex gap-2">
                     <button onClick={handleLeaveConfirm}
                       className="flex-1 rounded-xl py-2.5 transition-all active:scale-95"
                       style={{ background: '#dc2626', color: '#fff', fontWeight: 700, fontSize: 14 }}>
                       Yes, Leave
                     </button>
-                    <button onClick={() => { setLeaveConfirmPlayer(null); setLeaveName(''); }}
+                    <button onClick={() => { setLeaveConfirmPlayer(null); setLeaveName(''); setLeavePin(''); setLeaveError(''); }}
                       className="rounded-xl px-4 py-2.5 transition-all active:scale-95"
                       style={{ background: '#EAEAEA', color: '#555', fontWeight: 600, fontSize: 14 }}>
                       Cancel
@@ -388,7 +484,19 @@ export function MatchDetails({ id }: Props) {
         )}
 
         <div className="grid grid-cols-2 gap-2 mb-2">
-          <button onClick={() => { setShowJoin(!showJoin); setShowAddPlayer(false); setShowLeave(false); }} disabled={match.registrationClosed || isFull}
+          <button
+            onClick={() => {
+              const nextShowJoin = !showJoin;
+              setShowJoin(nextShowJoin);
+              setShowAddPlayer(false);
+              setShowLeave(false);
+              if (!nextShowJoin) {
+                setJoinName('');
+                setJoinPin('');
+                setJoinError('');
+              }
+            }}
+            disabled={match.registrationClosed || isFull}
             className="rounded-xl py-3 flex items-center justify-center gap-1.5 transition-all active:scale-95"
             style={{ background: match.registrationClosed || isFull ? '#EAEAEA' : '#1DB954', color: match.registrationClosed || isFull ? '#aaa' : '#fff', fontWeight: 700, fontSize: 14 }}>
             Join Match
@@ -442,6 +550,47 @@ export function MatchDetails({ id }: Props) {
 
       {showImport && (
         <ImportMatchModal onClose={() => setShowImport(false)} preselectedMatchId={id} />
+      )}
+
+      {removeConfirmPlayer && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center px-4" style={{ background: 'rgba(0,0,0,0.45)' }}>
+          <div className="w-full max-w-sm rounded-2xl p-5" style={{ background: '#fff' }}>
+            <h3 style={{ fontWeight: 800, fontSize: 18, color: '#111' }}>Remove Player</h3>
+            <p style={{ color: '#666', fontSize: 13, marginTop: 6 }}>
+              Enter {removeConfirmPlayer.name}&apos;s 4-digit player PIN, or the match PIN.
+            </p>
+            <input
+              type="password"
+              inputMode="numeric"
+              maxLength={4}
+              autoFocus
+              className="w-full rounded-xl px-4 py-3 mt-3 outline-none"
+              style={{ background: '#fff', border: '1.5px solid #EAEAEA', color: '#111', fontWeight: 600, letterSpacing: 2 }}
+              value={removePin}
+              onChange={e => {
+                setRemovePin(e.target.value.replace(/\D/g, '').slice(0, 4));
+                if (removeError) setRemoveError('');
+              }}
+              onKeyDown={e => e.key === 'Enter' && handleRemoveConfirm()}
+              placeholder="••••"
+            />
+            {removeError && <p style={{ color: '#dc2626', fontSize: 12, marginTop: 8 }}>{removeError}</p>}
+            <div className="flex gap-2 mt-4">
+              <button
+                onClick={handleRemoveConfirm}
+                className="flex-1 rounded-xl py-2.5 transition-all active:scale-95"
+                style={{ background: '#DC2626', color: '#fff', fontWeight: 700 }}>
+                Remove
+              </button>
+              <button
+                onClick={() => { setRemoveConfirmPlayer(null); setRemovePin(''); setRemoveError(''); }}
+                className="flex-1 rounded-xl py-2.5 transition-all active:scale-95"
+                style={{ background: '#EAEAEA', color: '#555', fontWeight: 700 }}>
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {showPinPrompt && (

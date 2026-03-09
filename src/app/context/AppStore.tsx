@@ -11,6 +11,7 @@ export interface Player {
   name: string;
   status: PaymentStatus;
   team: TeamId;
+  joinPin: string | null;
 }
 
 export interface Match {
@@ -83,9 +84,9 @@ interface AppContextType {
   matches: Match[];
   addMatch: (match: Omit<Match, 'id' | 'players' | 'registrationClosed'>) => void;
   updateMatch: (match: Match) => void;
-  addPlayer: (matchId: string, name: string) => void;
+  addPlayer: (matchId: string, name: string, joinPin?: string | null) => void;
   updatePlayerStatus: (matchId: string, playerId: string, status: PaymentStatus) => void;
-  removePlayer: (matchId: string, playerId: string) => void;
+  removePlayer: (matchId: string, playerId: string, pin: string) => boolean;
   closeRegistration: (matchId: string, pin: string) => boolean;
   openRegistration: (matchId: string, pin: string) => boolean;
   deleteMatch: (matchId: string, pin: string) => boolean;
@@ -100,22 +101,22 @@ const AppContext = createContext<AppContextType | null>(null);
 
 // ─── Seed data ────────────────────────────────────────────────────────────────
 const mockPlayers: Player[] = [
-  { id: 'p1',  name: 'Sachin',   status: 'paid',   team: 'A' },
-  { id: 'p2',  name: 'Lama',     status: 'paid',   team: 'A' },
-  { id: 'p3',  name: 'Raj',      status: 'unpaid', team: 'B' },
-  { id: 'p4',  name: 'Mehdi',    status: 'cash',   team: 'A' },
-  { id: 'p5',  name: 'Wesley',   status: 'paid',   team: 'B' },
-  { id: 'p6',  name: 'Saad',     status: 'unpaid', team: 'B' },
-  { id: 'p7',  name: 'Mahad',    status: 'unpaid', team: 'A' },
-  { id: 'p8',  name: 'Emmanuel', status: 'paid',   team: 'B' },
-  { id: 'p9',  name: 'Patrick',  status: 'unpaid', team: 'A' },
-  { id: 'p10', name: 'Ganesh',   status: 'paid',   team: 'B' },
-  { id: 'p11', name: 'Abiola',   status: 'unpaid', team: 'A' },
-  { id: 'p12', name: 'Mathias',  status: 'cash',   team: 'B' },
-  { id: 'p13', name: 'Romodan',  status: 'paid',   team: 'A' },
-  { id: 'p14', name: 'Mustafa',  status: 'unpaid', team: 'B' },
-  { id: 'p15', name: 'Soundgag', status: 'unpaid', team: 'A' },
-  { id: 'p16', name: 'Tobi',     status: 'paid',   team: 'B' },
+  { id: 'p1',  name: 'Sachin',   status: 'paid',   team: 'A', joinPin: null },
+  { id: 'p2',  name: 'Lama',     status: 'paid',   team: 'A', joinPin: null },
+  { id: 'p3',  name: 'Raj',      status: 'unpaid', team: 'B', joinPin: null },
+  { id: 'p4',  name: 'Mehdi',    status: 'cash',   team: 'A', joinPin: null },
+  { id: 'p5',  name: 'Wesley',   status: 'paid',   team: 'B', joinPin: null },
+  { id: 'p6',  name: 'Saad',     status: 'unpaid', team: 'B', joinPin: null },
+  { id: 'p7',  name: 'Mahad',    status: 'unpaid', team: 'A', joinPin: null },
+  { id: 'p8',  name: 'Emmanuel', status: 'paid',   team: 'B', joinPin: null },
+  { id: 'p9',  name: 'Patrick',  status: 'unpaid', team: 'A', joinPin: null },
+  { id: 'p10', name: 'Ganesh',   status: 'paid',   team: 'B', joinPin: null },
+  { id: 'p11', name: 'Abiola',   status: 'unpaid', team: 'A', joinPin: null },
+  { id: 'p12', name: 'Mathias',  status: 'cash',   team: 'B', joinPin: null },
+  { id: 'p13', name: 'Romodan',  status: 'paid',   team: 'A', joinPin: null },
+  { id: 'p14', name: 'Mustafa',  status: 'unpaid', team: 'B', joinPin: null },
+  { id: 'p15', name: 'Soundgag', status: 'unpaid', team: 'A', joinPin: null },
+  { id: 'p16', name: 'Tobi',     status: 'paid',   team: 'B', joinPin: null },
 ];
 
 const initialMatches: Match[] = [
@@ -146,9 +147,9 @@ const initialMatches: Match[] = [
     maxPlayers: 12,
     fields: 1,
     players: [
-      { id: 'q1', name: 'Alex',   status: 'paid',   team: 'A' },
-      { id: 'q2', name: 'Jordan', status: 'unpaid', team: 'B' },
-      { id: 'q3', name: 'Taylor', status: 'cash',   team: null },
+      { id: 'q1', name: 'Alex',   status: 'paid',   team: 'A', joinPin: null },
+      { id: 'q2', name: 'Jordan', status: 'unpaid', team: 'B', joinPin: null },
+      { id: 'q3', name: 'Taylor', status: 'cash',   team: null, joinPin: null },
     ],
     registrationPin: '1234',
     registrationClosed: false,
@@ -172,9 +173,12 @@ const teamOr = (value: unknown): TeamId =>
 const pinOr = (value: unknown): string =>
   typeof value === 'string' && /^\d{4}$/.test(value) ? value : '0000';
 
+const optionalPinOr = (value: unknown): string | null =>
+  typeof value === 'string' && /^\d{4}$/.test(value) ? value : null;
+
 function normalizePlayer(raw: unknown, fallbackId: string): Player {
   if (!raw || typeof raw !== 'object') {
-    return { id: fallbackId, name: 'Player', status: 'unpaid', team: null };
+    return { id: fallbackId, name: 'Player', status: 'unpaid', team: null, joinPin: null };
   }
   const value = raw as Record<string, unknown>;
   return {
@@ -182,6 +186,7 @@ function normalizePlayer(raw: unknown, fallbackId: string): Player {
     name: stringOr(value.name, 'Player'),
     status: statusOr(value.status),
     team: teamOr(value.team),
+    joinPin: optionalPinOr(value.joinPin),
   };
 }
 
@@ -292,6 +297,7 @@ export function AppProvider({ children }: { children?: ReactNode }) {
         name: p.name,
         status: p.status,
         team: null,
+        joinPin: null,
       })),
       registrationPin: '0000',
       registrationClosed: false,
@@ -313,6 +319,7 @@ export function AppProvider({ children }: { children?: ReactNode }) {
           name: player.name,
           status: player.status as PaymentStatus,
           team: null,
+          joinPin: null,
         }));
       } else {
         const importedByName = new Map(
@@ -326,6 +333,7 @@ export function AppProvider({ children }: { children?: ReactNode }) {
             name: player.name,
             status: player.status as PaymentStatus,
             team: null as null,
+            joinPin: null,
           }));
         updatedPlayers = [
           ...existingMatch.players.map((player) => ({
@@ -359,14 +367,14 @@ export function AppProvider({ children }: { children?: ReactNode }) {
     persistMatch(updated);
   };
 
-  const addPlayer = (matchId: string, name: string) => {
+  const addPlayer = (matchId: string, name: string, joinPin: string | null = null) => {
     const match = matches.find((value) => value.id === matchId);
     if (!match) return;
     const updatedMatch: Match = {
       ...match,
       players: [
         ...match.players,
-        { id: `player-${Date.now()}`, name: name.trim(), status: 'unpaid', team: null },
+        { id: `player-${Date.now()}`, name: name.trim(), status: 'unpaid', team: null, joinPin },
       ],
     };
     updateMatch(updatedMatch);
@@ -384,14 +392,21 @@ export function AppProvider({ children }: { children?: ReactNode }) {
     updateMatch(updatedMatch);
   };
 
-  const removePlayer = (matchId: string, playerId: string) => {
+  const removePlayer = (matchId: string, playerId: string, pin: string): boolean => {
     const match = matches.find((value) => value.id === matchId);
-    if (!match) return;
+    if (!match) return false;
+    const targetPlayer = match.players.find((player) => player.id === playerId);
+    if (!targetPlayer) return false;
+    const canRemove =
+      pin === match.registrationPin ||
+      (targetPlayer.joinPin !== null && targetPlayer.joinPin === pin);
+    if (!canRemove) return false;
     const updatedMatch: Match = {
       ...match,
       players: match.players.filter((player) => player.id !== playerId),
     };
     updateMatch(updatedMatch);
+    return true;
   };
 
   const closeRegistration = (matchId: string, pin: string): boolean => {
