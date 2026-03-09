@@ -113,6 +113,10 @@ export function MatchDetails({ id }: Props) {
 
   // Import modal
   const [showImport, setShowImport] = useState(false);
+  const [showPinPrompt, setShowPinPrompt] = useState(false);
+  const [registrationPinInput, setRegistrationPinInput] = useState('');
+  const [pinError, setPinError] = useState('');
+  const [pinAction, setPinAction] = useState<'open' | 'close' | null>(null);
 
   if (!match) {
     return (
@@ -190,6 +194,37 @@ export function MatchDetails({ id }: Props) {
     setLeaveConfirmPlayer(null);
     setLeaveError('');
     setLeaveSuccess('');
+  };
+
+  const resetPinPrompt = () => {
+    setShowPinPrompt(false);
+    setRegistrationPinInput('');
+    setPinError('');
+    setPinAction(null);
+  };
+
+  const handleToggleRegistration = () => {
+    setPinAction(match.registrationClosed ? 'open' : 'close');
+    setShowPinPrompt(true);
+    setRegistrationPinInput('');
+    setPinError('');
+  };
+
+  const handlePinConfirm = () => {
+    if (!pinAction) return;
+    if (!/^\d{4}$/.test(registrationPinInput)) {
+      setPinError('PIN must be exactly 4 digits.');
+      return;
+    }
+    const success =
+      pinAction === 'open'
+        ? openRegistration(match.id, registrationPinInput)
+        : closeRegistration(match.id, registrationPinInput);
+    if (!success) {
+      setPinError('Incorrect PIN.');
+      return;
+    }
+    resetPinPrompt();
   };
 
   return (
@@ -345,7 +380,7 @@ export function MatchDetails({ id }: Props) {
           </button>
         </div>
         <div className="grid grid-cols-3 gap-2">
-          <button onClick={() => match.registrationClosed ? openRegistration(match.id) : closeRegistration(match.id)}
+          <button onClick={handleToggleRegistration}
             className="rounded-xl py-3 flex items-center justify-center gap-1 transition-all active:scale-95"
             style={{ background: '#EAEAEA', color: '#333', fontWeight: 700, fontSize: 12 }}>
             {match.registrationClosed ? <><Unlock size={13} /><span>Open Reg</span></> : <><Lock size={13} /><span>Close Reg</span></>}
@@ -367,6 +402,47 @@ export function MatchDetails({ id }: Props) {
 
       {showImport && (
         <ImportMatchModal onClose={() => setShowImport(false)} preselectedMatchId={id} />
+      )}
+
+      {showPinPrompt && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center px-4" style={{ background: 'rgba(0,0,0,0.45)' }}>
+          <div className="w-full max-w-sm rounded-2xl p-5" style={{ background: '#fff' }}>
+            <h3 style={{ fontWeight: 800, fontSize: 18, color: '#111' }}>
+              {pinAction === 'open' ? 'Open Registration' : 'Close Registration'}
+            </h3>
+            <p style={{ color: '#666', fontSize: 13, marginTop: 6 }}>Enter the 4-digit match PIN.</p>
+            <input
+              type="password"
+              inputMode="numeric"
+              maxLength={4}
+              autoFocus
+              className="w-full rounded-xl px-4 py-3 mt-3 outline-none"
+              style={{ background: '#fff', border: '1.5px solid #EAEAEA', color: '#111', fontWeight: 600, letterSpacing: 2 }}
+              value={registrationPinInput}
+              onChange={e => {
+                setRegistrationPinInput(e.target.value.replace(/\D/g, '').slice(0, 4));
+                if (pinError) setPinError('');
+              }}
+              onKeyDown={e => e.key === 'Enter' && handlePinConfirm()}
+              placeholder="••••"
+            />
+            {pinError && <p style={{ color: '#dc2626', fontSize: 12, marginTop: 8 }}>{pinError}</p>}
+            <div className="flex gap-2 mt-4">
+              <button
+                onClick={handlePinConfirm}
+                className="flex-1 rounded-xl py-2.5 transition-all active:scale-95"
+                style={{ background: '#0F5132', color: '#fff', fontWeight: 700 }}>
+                Confirm
+              </button>
+              <button
+                onClick={resetPinPrompt}
+                className="flex-1 rounded-xl py-2.5 transition-all active:scale-95"
+                style={{ background: '#EAEAEA', color: '#555', fontWeight: 700 }}>
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

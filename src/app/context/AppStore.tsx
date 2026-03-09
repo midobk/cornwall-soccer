@@ -25,6 +25,7 @@ export interface Match {
   maxPlayers: number;
   fields: number;
   players: Player[];
+  registrationPin: string;
   registrationClosed: boolean;
 }
 
@@ -39,6 +40,7 @@ interface MatchDocument {
   maxPlayers: number;
   fields: number;
   players: Player[];
+  registrationPin: string;
   registrationClosed: boolean;
   createdAt?: number;
   updatedAt?: number;
@@ -84,8 +86,8 @@ interface AppContextType {
   addPlayer: (matchId: string, name: string) => void;
   updatePlayerStatus: (matchId: string, playerId: string, status: PaymentStatus) => void;
   removePlayer: (matchId: string, playerId: string) => void;
-  closeRegistration: (matchId: string) => void;
-  openRegistration: (matchId: string) => void;
+  closeRegistration: (matchId: string, pin: string) => boolean;
+  openRegistration: (matchId: string, pin: string) => boolean;
   setTeams: (matchId: string, players: Player[]) => void;
   getMatch: (matchId: string) => Match | undefined;
   // import helpers
@@ -128,6 +130,7 @@ const initialMatches: Match[] = [
     maxPlayers: 16,
     fields: 2,
     players: mockPlayers,
+    registrationPin: '1234',
     registrationClosed: false,
   },
   {
@@ -146,6 +149,7 @@ const initialMatches: Match[] = [
       { id: 'q2', name: 'Jordan', status: 'unpaid', team: 'B' },
       { id: 'q3', name: 'Taylor', status: 'cash',   team: null },
     ],
+    registrationPin: '1234',
     registrationClosed: false,
   },
 ];
@@ -163,6 +167,9 @@ const statusOr = (value: unknown): PaymentStatus =>
 
 const teamOr = (value: unknown): TeamId =>
   value === 'A' || value === 'B' || value === null ? value : null;
+
+const pinOr = (value: unknown): string =>
+  typeof value === 'string' && /^\d{4}$/.test(value) ? value : '0000';
 
 function normalizePlayer(raw: unknown, fallbackId: string): Player {
   if (!raw || typeof raw !== 'object') {
@@ -191,6 +198,7 @@ function normalizeMatch(id: string, raw: Record<string, unknown>): Match {
     maxPlayers: numberOr(raw.maxPlayers, 16),
     fields: numberOr(raw.fields, 1),
     players: playersRaw.map((player, idx) => normalizePlayer(player, `player-${id}-${idx}`)),
+    registrationPin: pinOr(raw.registrationPin),
     registrationClosed: Boolean(raw.registrationClosed),
   };
 }
@@ -207,6 +215,7 @@ function toMatchDocument(match: Match): MatchDocument {
     maxPlayers: match.maxPlayers,
     fields: match.fields,
     players: match.players,
+    registrationPin: match.registrationPin,
     registrationClosed: match.registrationClosed,
   };
 }
@@ -283,6 +292,7 @@ export function AppProvider({ children }: { children?: ReactNode }) {
         status: p.status,
         team: null,
       })),
+      registrationPin: '0000',
       registrationClosed: false,
     };
     setMatches(prev => [newMatch, ...prev]);
@@ -383,16 +393,18 @@ export function AppProvider({ children }: { children?: ReactNode }) {
     updateMatch(updatedMatch);
   };
 
-  const closeRegistration = (matchId: string) => {
+  const closeRegistration = (matchId: string, pin: string): boolean => {
     const match = matches.find((value) => value.id === matchId);
-    if (!match) return;
+    if (!match || match.registrationPin !== pin) return false;
     updateMatch({ ...match, registrationClosed: true });
+    return true;
   };
 
-  const openRegistration = (matchId: string) => {
+  const openRegistration = (matchId: string, pin: string): boolean => {
     const match = matches.find((value) => value.id === matchId);
-    if (!match) return;
+    if (!match || match.registrationPin !== pin) return false;
     updateMatch({ ...match, registrationClosed: false });
+    return true;
   };
 
   const setTeams = (matchId: string, players: Player[]) => {

@@ -12,6 +12,7 @@ export function CreateMatch() {
   const [fieldCost, setFieldCost] = useState('');
   const [pricePerPlayer, setPricePerPlayer] = useState('');
   const [paymentEmail, setPaymentEmail] = useState('');
+  const [registrationPin, setRegistrationPin] = useState('');
   const [maxPlayers, setMaxPlayers] = useState('16');
   const [fields, setFields] = useState('2');
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -25,6 +26,7 @@ export function CreateMatch() {
     if (pricingMode === 'field' && (!fieldCost || Number(fieldCost) <= 0)) e.fieldCost = 'Field cost must be greater than 0';
     if (pricingMode === 'player' && (!pricePerPlayer || Number(pricePerPlayer) <= 0)) e.pricePerPlayer = 'Price per player must be greater than 0';
     if (!paymentEmail.trim()) e.paymentEmail = 'Payment email is required';
+    if (!/^\d{4}$/.test(registrationPin)) e.registrationPin = 'PIN must be exactly 4 digits';
     if (!maxPlayers || Number(maxPlayers) < 2) e.maxPlayers = 'Minimum 2 players';
     if (!fields || Number(fields) < 1) e.fields = 'Minimum 1 field';
     setErrors(e);
@@ -39,6 +41,7 @@ export function CreateMatch() {
       fieldCost: pricingMode === 'field' ? Number(fieldCost) : 0,
       pricePerPlayer: pricingMode === 'player' ? Number(pricePerPlayer) : 0,
       paymentEmail: paymentEmail.trim(),
+      registrationPin,
       maxPlayers: Number(maxPlayers),
       fields: Number(fields),
     });
@@ -126,6 +129,21 @@ export function CreateMatch() {
           <label style={labelStyle}>Payment Email</label>
           <input type="email" className={inputClass} style={errors.paymentEmail ? inputErrorStyle : inputStyle} placeholder="e.g. yourname@email.com" value={paymentEmail} onChange={e => setPaymentEmail(e.target.value)} />
           {errors.paymentEmail && <p style={{ color: '#ef4444', fontSize: 12 }}>{errors.paymentEmail}</p>}
+        </div>
+
+        <div className="space-y-2">
+          <label style={labelStyle}>Registration PIN (4 digits)</label>
+          <input
+            type="password"
+            inputMode="numeric"
+            maxLength={4}
+            className={inputClass}
+            style={errors.registrationPin ? inputErrorStyle : inputStyle}
+            placeholder="e.g. 1234"
+            value={registrationPin}
+            onChange={e => setRegistrationPin(e.target.value.replace(/\D/g, '').slice(0, 4))}
+          />
+          {errors.registrationPin && <p style={{ color: '#ef4444', fontSize: 12 }}>{errors.registrationPin}</p>}
         </div>
 
         <div className="grid grid-cols-2 gap-3">
